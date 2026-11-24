@@ -27,8 +27,11 @@
 //!   functions of [`Preferences`] turn garbage into the DEFAULT, which would shadow the fallback).
 //! * **Account-bound.** A record is visible only while its `account` equals the non-empty stamp of
 //!   the signed-in account (`grant::account_key` of the account token). The owner's `""` record of
-//!   two accounts therefore never mixes, a re-login that replaced the token without a sign-out
-//!   leaves the previous records unreachable, and the next write prunes them ([`put_own`]).
+//!   two accounts therefore never mixes. A re-login that replaces the token without a sign-out
+//!   keeps the records when the roster names the same owner ([`carry_account_stamp`], from the
+//!   reauthentication save): the stamp moves with the token, including one stamp a previous
+//!   token change already left unreachable. A known different owner drops the list. An unnamed
+//!   roster leaves it. The next [`put_own`] still prunes every stamp but the one it writes.
 //! * **Written only through [`persist_profile_pref`] and [`persist_profile_hud`]** (one read-modify-write, `persist_profile_with`), which refuse without a seat, across a
 //!   tenure or credential change, and with an empty stamp.
 //! * **No `extensions`**: a field a later build adds is not carried by this one.
@@ -213,6 +216,103 @@ pub fn put_own_hud(records: &mut Vec<ProfilePrefsRecord>, user: &str, stamp: &st
     records[at].prefs.hud_selection = Some(id.to_string());
     records.prune_empty();
     true
+}
+
+/// **Move this account's records from the stamp `from` onto `to`.**
+///
+/// `from` and `to` are [`crate::plex::grant::account_key`] values, not tokens. An empty stamp or
+/// `from == to` changes nothing. Records already under `to` keep the picks they hold; a field they
+/// never set is filled from the record being moved, then that record is dropped.
+///
+/// When `from` itself holds nothing, one earlier token change has already left every record on a
+/// single unreachable stamp (the bug this repairs: the file's token moved and the records did not).
+/// That stamp is moved onto `to` only when it is the only stamp in the list. Two stamps are two
+/// accounts, and a record already under `to` means this token has picks of its own — neither is
+/// rewritten from a leftover stamp.
+pub fn carry_account_stamp(records: &mut Vec<ProfilePrefsRecord>, from: &str, to: &str) -> bool {
+    if from.is_empty() || to.is_empty() || from == to {
+        return false;
+    }
+    if records.iter().any(|r| r.account == from) {
+        return adopt_account_stamp(records, from, to);
+    }
+    if records.iter().any(|r| r.account == to || r.account.is_empty()) {
+        return false;
+    }
+    let mut foreign: Option<String> = None;
+    for record in records.iter() {
+        match &foreign {
+            None => foreign = Some(record.account.clone()),
+            Some(stamp) if stamp == &record.account => {}
+            Some(_) => return false,
+        }
+    }
+    match foreign {
+        Some(stamp) => adopt_account_stamp(records, &stamp, to),
+        None => false,
+    }
+}
+
+/// Rewrite every record stamped `from` so it is stamped `to`, merging a profile that already has
+/// a `to` record. `from` and `to` are non-empty and different; the caller checked.
+fn adopt_account_stamp(records: &mut Vec<ProfilePrefsRecord>, from: &str, to: &str) -> bool {
+    let mut changed = false;
+    let mut i = 0;
+    while i < records.len() {
+        if records[i].account != from {
+            i += 1;
+            continue;
+        }
+        let mut src = records.remove(i);
+        changed = true;
+        if let Some(at) = records.position_of(&src.user, to) {
+            fill_absent(&mut records[at].prefs, &src.prefs);
+        } else {
+            src.account = to.to_string();
+            records.push(src);
+        }
+    }
+    records.prune_empty();
+    changed
+}
+
+/// Copy each field `dest` has not picked from `src`. Naming every field makes a new setting a
+/// compile error here, the same drift the record's field test catches for the row table.
+fn fill_absent(dest: &mut ProfilePrefs, src: &ProfilePrefs) {
+    let ProfilePrefs {
+        playback_quality,
+        direct_play_mode,
+        subtitle_tone,
+        subtitle_size,
+        subtitle_position,
+        hdr_overlay_brightness,
+        next_episode_mode,
+        skip_interval,
+        instant_dpad_seeking,
+        uri_engine,
+        dolby_vision_mode,
+        intro_skip,
+        credits_skip,
+        deck_press,
+        under_posters,
+        audio_enhancements,
+        trailer_autoplay,
+        hud_end_time,
+        hud_selection,
+    } = src;
+    macro_rules! keep {
+        ($($field:ident),* $(,)?) => {$(
+            if dest.$field.is_none() {
+                dest.$field = (*$field).clone();
+            }
+        )*};
+    }
+    keep!(
+        playback_quality, direct_play_mode, subtitle_tone, subtitle_size, subtitle_position,
+        hdr_overlay_brightness, next_episode_mode, skip_interval, instant_dpad_seeking, uri_engine,
+        dolby_vision_mode, intro_skip, credits_skip, deck_press, under_posters, audio_enhancements,
+        trailer_autoplay, hud_end_time, hud_selection,
+    );
 }
 
 /// The values `user` picked under the stamp `stamp`, if the stamp is one that can be read at all

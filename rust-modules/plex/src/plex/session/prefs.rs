@@ -52,8 +52,9 @@ mod track_memory_document_tests;
 #[cfg(test)]
 mod track_memory_tests;
 pub use profile_prefs::{
-    effective, effective_hud, own_prefs, persist_profile_hud, persist_profile_pref, put_own_hud, stored_effective_hud, put_own, stored_effective, ProfilePrefs, ProfilePrefsPref,
-    ProfilePrefsRecord, ProfileSetting, ProfileWrite,
+    carry_account_stamp, effective, effective_hud, own_prefs, persist_profile_hud,
+    persist_profile_pref, put_own_hud, stored_effective_hud, put_own, stored_effective, ProfilePrefs,
+    ProfilePrefsPref, ProfilePrefsRecord, ProfileSetting, ProfileWrite,
 };
 pub use track_memory::{
     AudioMemo, SubtitleMemo, SubtitleTrackMemo, TrackMemoryEntry, TrackMemoryPref, CAP as TRACK_MEMORY_CAP,

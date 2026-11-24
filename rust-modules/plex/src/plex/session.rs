@@ -107,7 +107,8 @@ impl CurrentProfile {
 ///   nothing may be written for it.
 /// * [`Seat::Seated`] names the Plex Home user's `uuid` (`""` for the account owner) and the
 ///   account stamp. Two seats are the same seat only when both match, so a re-login as the same
-///   person with a different token is a new seat.
+///   person with a different token is a new seat. That person's stored picks move onto the new
+///   stamp in the reauthentication save; the seat value itself still changes.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum Seat {
     #[default]
@@ -4650,6 +4651,29 @@ pub fn replace_after_reauthentication_guarded_with_outcome(
     // never the token: a fresh QR sign-in always mints a new plex.tv token, so the same person
     // signing in again differs by token and must keep their pins, searches and library memory.
     // Unknown on either side (a roster not yet fetched, or one without a nameable admin) clears.
+    //
+    // Profile settings are the exception that carries a stamp, and the stamp is the token
+    // (`grant::account_key`), not the owner. A new token would make Skip intros, Skip credits and
+    // every other per-profile pick unreadable, and the frozen install-wide key — Manual, for the
+    // marker modes, which a per-profile pick never writes — would show instead. The same owner
+    // keeps the records, moved onto the new stamp. A known different owner drops them, so a later
+    // sign-in of that owner cannot adopt the previous account's single leftover stamp. An unnamed
+    // roster leaves the records: destroying them would lose the only copy, and moving them would
+    // hand them to whoever the unnamed token turns out to be. Library views, pins and searches
+    // stay on the rule below (unknown clears); they have no stamp to come back under.
+    if !cur.account_token.is_empty() && cur.account_token != next.account_token {
+        match (owner_identity(&cur.home_users), owner_identity(&next.home_users)) {
+            (Some(previous), Some(incoming)) if previous == incoming => {
+                prefs::carry_account_stamp(
+                    &mut next.prefs.profile_prefs,
+                    &crate::plex::grant::account_key(&cur.account_token),
+                    &crate::plex::grant::account_key(&next.account_token),
+                );
+            }
+            (Some(_), Some(_)) => next.prefs.profile_prefs.clear(),
+            _ => {}
+        }
+    }
     if !cur.account_token.is_empty() && !same_owner(&cur.home_users, &next.home_users) {
         next.prefs.last_library.clear();
         next.prefs.library_views.clear();

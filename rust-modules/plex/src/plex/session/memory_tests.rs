@@ -471,3 +471,146 @@ fn a_login_keeps_what_belongs_to_the_same_account_identity_whatever_its_token() 
     login_with_roster("token-e", roster_of(7));
     assert_eq!(kept(&load()), (0, 0, 0, 0), "an unnamed stored identity clears");
 }
+
+fn owner_seat(token: &str) -> Seat {
+    Seat::Seated { user: String::new(), stamp: crate::plex::grant::account_key(token) }
+}
+
+/// Skip intros and Skip credits, saved for the owner under `token`'s stamp. The install-wide keys
+/// stay at their default: a per-profile pick never writes them, so a missed stamp reads Manual.
+fn save_automatic_skip(token: &str, owner: i64) {
+    let mut session = Session {
+        client_id: "cid-1".into(),
+        account_token: token.into(),
+        home_users: roster_of(owner),
+        ..Default::default()
+    };
+    let stamp = crate::plex::grant::account_key(token);
+    assert!(prefs::put_own::<prefs::IntroSkipPref>(
+        &mut session.prefs.profile_prefs,
+        "",
+        &stamp,
+        MarkerSkipMode::Automatic
+    ));
+    assert!(prefs::put_own::<prefs::CreditsSkipPref>(
+        &mut session.prefs.profile_prefs,
+        "",
+        &stamp,
+        MarkerSkipMode::Disabled
+    ));
+    assert!(prefs::put_own::<prefs::IntroSkipPref>(
+        &mut session.prefs.profile_prefs,
+        "kid",
+        &stamp,
+        MarkerSkipMode::Automatic
+    ));
+    save(&session);
+}
+
+fn skip_modes(token: &str) -> (MarkerSkipMode, MarkerSkipMode, MarkerSkipMode) {
+    let loaded = load();
+    let owner = owner_seat(token);
+    let kid = Seat::Seated { user: "kid".into(), stamp: crate::plex::grant::account_key(token) };
+    (
+        prefs::stored_effective::<prefs::IntroSkipPref>(&loaded, &owner),
+        prefs::stored_effective::<prefs::CreditsSkipPref>(&loaded, &owner),
+        prefs::stored_effective::<prefs::IntroSkipPref>(&loaded, &kid),
+    )
+}
+
+/// **A fresh sign-in mints a new account token, and profile settings are stamped with that token.**
+/// Skip intros / Skip credits were saved only on the per-profile record (the install-wide key stays
+/// Manual, the type default). Replacing the token without moving the stamp made Settings and the
+/// player read Manual — one Skip pill, no countdown — while the Plex Pass grant stayed true.
+#[test]
+fn a_same_owner_sign_in_keeps_skip_intros_and_credits_across_a_new_token() {
+    let _serial = plx_base::testlock::serial();
+    let _root = TempSession::new("relogin-skip-markers");
+    save_automatic_skip("token-a", 7);
+    assert_eq!(load().prefs.intro_skip, MarkerSkipMode::Manual, "control: the legacy key was not written");
+    assert_eq!(load().prefs.credits_skip, MarkerSkipMode::Manual);
+
+    login_with_roster("token-b", roster_of(7));
+    assert_eq!(load().account_token, "token-b");
+    assert_eq!(
+        skip_modes("token-b"),
+        (MarkerSkipMode::Automatic, MarkerSkipMode::Disabled, MarkerSkipMode::Automatic),
+        "the same owner, a new token: the saved modes moved onto the new stamp"
+    );
+    assert_eq!(
+        load().prefs.intro_skip,
+        MarkerSkipMode::Manual,
+        "survival is the profile record, not the legacy fallback"
+    );
+    assert!(load().prefs.profile_prefs.iter().all(|r| r.account == crate::plex::grant::account_key("token-b")));
+}
+
+/// The token on disk has already moved and the records have not (a sign-in from before the stamp
+/// followed the token). The next same-owner sign-in still finds that one leftover stamp.
+#[test]
+fn a_sign_in_recovers_skip_intros_a_previous_token_change_left_behind() {
+    let _serial = plx_base::testlock::serial();
+    let _root = TempSession::new("relogin-skip-orphan");
+    save_automatic_skip("token-a", 7);
+    let mut orphaned = load();
+    orphaned.account_token = "token-b".into();
+    save(&orphaned);
+    assert_eq!(
+        skip_modes("token-b").0,
+        MarkerSkipMode::Manual,
+        "control: the new stamp cannot see the old record"
+    );
+
+    login_with_roster("token-c", roster_of(7));
+    assert_eq!(
+        skip_modes("token-c"),
+        (MarkerSkipMode::Automatic, MarkerSkipMode::Disabled, MarkerSkipMode::Automatic),
+        "one leftover stamp of the same owner is recovered"
+    );
+}
+
+/// A known different owner does not inherit the previous account's marker modes, and a second
+/// sign-in of that owner does not adopt them later either.
+#[test]
+fn a_different_owner_does_not_inherit_skip_intros() {
+    let _serial = plx_base::testlock::serial();
+    let _root = TempSession::new("relogin-skip-other-owner");
+    save_automatic_skip("token-a", 7);
+
+    login_with_roster("token-d", roster_of(8));
+    assert!(
+        load().prefs.profile_prefs.is_empty(),
+        "a known different owner drops the previous account's records"
+    );
+    assert_eq!(skip_modes("token-d").0, MarkerSkipMode::Manual);
+
+    login_with_roster("token-e", roster_of(8));
+    assert!(
+        load().prefs.profile_prefs.is_empty(),
+        "the next sign-in of that owner does not resurrect them"
+    );
+    assert_eq!(skip_modes("token-e").0, MarkerSkipMode::Manual);
+}
+
+/// An unnamed roster is not "a different person" and not "the same person". The records stay on
+/// their stamp: moving them would hand them to an unknown account, and dropping them would lose
+/// the only copy.
+#[test]
+fn an_unnamed_roster_does_not_move_or_drop_skip_intros() {
+    let _serial = plx_base::testlock::serial();
+    let _root = TempSession::new("relogin-skip-unnamed");
+    save_automatic_skip("token-a", 7);
+    let mut stored = load();
+    stored.home_users.clear();
+    save(&stored);
+
+    login_with_roster("token-b", roster_of(7));
+    let loaded = load();
+    assert_eq!(loaded.account_token, "token-b");
+    assert_eq!(skip_modes("token-b").0, MarkerSkipMode::Manual, "the new stamp does not read them");
+    let old = crate::plex::grant::account_key("token-a");
+    assert!(
+        loaded.prefs.profile_prefs.iter().any(|r| r.account == old),
+        "the old stamp's records are still in the file"
+    );
+}

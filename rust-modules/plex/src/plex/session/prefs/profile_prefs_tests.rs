@@ -635,3 +635,91 @@ fn two_profiles_each_keep_their_own_hud_pick() {
     assert_eq!(own_prefs(&records, "a", STAMP).and_then(|p| p.hud_selection.as_deref()), Some("x"));
     assert_eq!(own_prefs(&records, "b", STAMP).and_then(|p| p.hud_selection.as_deref()), Some("y"));
 }
+
+fn marker_record(
+    user: &str,
+    stamp: &str,
+    intro: crate::plex::session::MarkerSkipMode,
+    credits: Option<crate::plex::session::MarkerSkipMode>,
+) -> ProfilePrefsRecord {
+    ProfilePrefsRecord {
+        user: user.into(),
+        account: stamp.into(),
+        prefs: ProfilePrefs {
+            intro_skip: Some(intro),
+            credits_skip: credits,
+            subtitle_size: Some(SubtitleSize::Large),
+            ..Default::default()
+        },
+    }
+}
+
+/// A new token's stamp receives the picks, including a field that is not a marker mode.
+#[test]
+fn carry_account_stamp_moves_every_profile_onto_the_new_stamp() {
+    use crate::plex::session::MarkerSkipMode::{Automatic, Disabled};
+    let (from, to) = ("aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb");
+    let mut records = vec![
+        marker_record("", from, Automatic, Some(Disabled)),
+        marker_record("kid", from, Automatic, None),
+    ];
+    assert!(carry_account_stamp(&mut records, from, to));
+    assert!(records.iter().all(|r| r.account == to));
+    let owner = own_prefs(&records, "", to).expect("the owner moved");
+    assert_eq!(owner.intro_skip, Some(Automatic));
+    assert_eq!(owner.credits_skip, Some(Disabled));
+    assert_eq!(owner.subtitle_size, Some(SubtitleSize::Large));
+    assert_eq!(own_prefs(&records, "kid", to).and_then(|p| p.intro_skip), Some(Automatic));
+    assert!(
+        !carry_account_stamp(&mut records, from, to),
+        "a second carry finds nothing under the old stamp"
+    );
+}
+
+/// A pick the new stamp already holds wins. A field it never set is filled from the record being moved.
+#[test]
+fn carry_account_stamp_fills_only_the_fields_the_new_stamp_has_not_picked() {
+    use crate::plex::session::MarkerSkipMode::{Automatic, Disabled, Manual};
+    let (from, to) = ("aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb");
+    let mut records = vec![
+        ProfilePrefsRecord {
+            user: String::new(),
+            account: to.into(),
+            prefs: ProfilePrefs { intro_skip: Some(Manual), ..Default::default() },
+        },
+        marker_record("", from, Automatic, Some(Disabled)),
+    ];
+    assert!(carry_account_stamp(&mut records, from, to));
+    assert_eq!(records.len(), 1);
+    let owner = own_prefs(&records, "", to).unwrap();
+    assert_eq!(owner.intro_skip, Some(Manual), "the new stamp's own pick is kept");
+    assert_eq!(owner.credits_skip, Some(Disabled), "a field it never set is filled");
+    assert_eq!(owner.subtitle_size, Some(SubtitleSize::Large));
+}
+
+/// The file's token already moved once, so the records sit on a stamp that is neither the previous
+/// token nor the new one. One such stamp is the same account's leftover and moves.
+#[test]
+fn carry_account_stamp_recovers_the_one_stamp_a_previous_token_change_left_behind() {
+    use crate::plex::session::MarkerSkipMode::Automatic;
+    let mut records = vec![marker_record("", "stamp-of-token-a", Automatic, Some(Automatic))];
+    assert!(carry_account_stamp(&mut records, "stamp-of-token-b", "stamp-of-token-c"));
+    assert_eq!(records[0].account, "stamp-of-token-c");
+    assert_eq!(
+        own_prefs(&records, "", "stamp-of-token-c").and_then(|p| p.intro_skip),
+        Some(Automatic)
+    );
+}
+
+/// Two leftover stamps are two accounts. Neither is moved onto the new token.
+#[test]
+fn carry_account_stamp_leaves_two_foreign_stamps_where_they_are() {
+    use crate::plex::session::MarkerSkipMode::Automatic;
+    let mut records = vec![
+        marker_record("", "stamp-a", Automatic, None),
+        marker_record("", "stamp-z", Automatic, None),
+    ];
+    let before = records.clone();
+    assert!(!carry_account_stamp(&mut records, "stamp-b", "stamp-c"));
+    assert_eq!(records, before);
+}

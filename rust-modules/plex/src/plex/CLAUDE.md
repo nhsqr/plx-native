@@ -523,7 +523,9 @@ a dead source is **absent** from Home and states itself in its own library secti
   are never copied and never written by a pick (`persist_profile_pref`, for a `Copy` `Setting`, and `persist_profile_hud`, for the HUD package id string,
   are the only writers and share `persist_profile_with`; they
   refuse without a seat, across a tenure or credential change and with an empty stamp, and prunes
-  records of other accounts). `profile_prefs` is account-bound (`ACCOUNT_BOUND_PREFERENCES`, so
+  records of other accounts). A same-owner re-login moves the records onto the new token's stamp
+  (`carry_account_stamp`, from `replace_after_reauthentication_guarded_with_outcome`); a known
+  different owner drops the list, and an unnamed roster leaves it. `profile_prefs` is account-bound (`ACCOUNT_BOUND_PREFERENCES`, so
   sign-out drops it and the legacy keys stay). Who is seated is `session::Seat`
   (`Seat::of(profile, stamp)`, `current_seat()`); the live cells follow it in `plx_media::route`.
   `hold_hint_taught` is Install and never account-bound, so sign-out keeps it: which hold hints
