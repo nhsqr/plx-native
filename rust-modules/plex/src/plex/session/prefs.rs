@@ -802,7 +802,10 @@ impl<R: ProfileKeyed> ProfileRecords<R> for Vec<R> {
     }
     fn prune_foreign(&mut self, account: &str) -> bool {
         let before = self.len();
-        self.retain(|r| r.account() == account);
+        // A write that does not yet know its owner must not destroy records already stamped
+        // with one. The next write that does know prunes every stamp but its own.
+        let keep_owner = !super::is_owner_stamp(account);
+        self.retain(|r| r.account() == account || (keep_owner && super::is_owner_stamp(r.account())));
         self.len() != before
     }
     fn prune_empty(&mut self) {
@@ -985,16 +988,23 @@ impl<E: MemoryEntry> ProfileMemory<E> for Vec<ProfileList<E>> {
 /// cap drains the oldest), so the list never holds two records for one `(user, account)`. Returns
 /// whether anything changed.
 fn adopt_unstamped<E: MemoryEntry>(list: &mut Vec<ProfileList<E>>, account: &str) -> bool {
+    restamp_memory(list, "", account)
+}
+
+/// Move every record stamped `from` onto `to`, merging a profile that already has a `to` record.
+/// The `to` record's entry wins a clash. `from` and `to` differ; the caller checked. An empty
+/// `from` is the unstamped record [`adopt_unstamped`] moves.
+fn restamp_memory<E: MemoryEntry>(list: &mut Vec<ProfileList<E>>, from: &str, to: &str) -> bool {
     let mut changed = false;
     let mut at = 0;
     while at < list.len() {
-        if !list[at].account.is_empty() {
+        if list[at].account != from {
             at += 1;
             continue;
         }
         changed = true;
-        let Some(own) = list.position_of(&list[at].user, account) else {
-            list[at].account = account.to_string();
+        let Some(own) = list.position_of(&list[at].user, to) else {
+            list[at].account = to.to_string();
             at += 1;
             continue;
         };
@@ -1008,6 +1018,78 @@ fn adopt_unstamped<E: MemoryEntry>(list: &mut Vec<ProfileList<E>>, account: &str
         target.items = items;
     }
     changed
+}
+
+/// Move profile-prefs records stamped `from` onto `to`. A profile that already has a `to` record
+/// keeps every field it has picked; a field it never set is filled from the record being moved.
+fn restamp_profile_prefs(records: &mut Vec<ProfilePrefsRecord>, from: &str, to: &str) -> bool {
+    let mut changed = false;
+    let mut i = 0;
+    while i < records.len() {
+        if records[i].account != from {
+            i += 1;
+            continue;
+        }
+        let src = records.remove(i);
+        changed = true;
+        if let Some(at) = records.position_of(&src.user, to) {
+            profile_prefs::fill_absent(&mut records[at].prefs, &src.prefs);
+        } else {
+            records.push(ProfilePrefsRecord { account: to.to_string(), ..src });
+        }
+    }
+    records.prune_empty();
+    changed
+}
+
+/// Move plaintext answers stamped `from` onto `to`. A server `to` already answered keeps that
+/// answer; the `from` row for the same server is dropped.
+fn restamp_consent(list: &mut Vec<super::PlaintextConsent>, from: &str, to: &str) -> bool {
+    let mut changed = false;
+    let mut i = 0;
+    while i < list.len() {
+        if list[i].account != from {
+            i += 1;
+            continue;
+        }
+        changed = true;
+        let machine = list[i].machine_id.clone();
+        if list.iter().any(|c| c.account == to && c.machine_id == machine) {
+            list.remove(i);
+        } else {
+            list[i].account = to.to_string();
+            i += 1;
+        }
+    }
+    changed
+}
+
+/// **Move records stamped `from` onto this session's [`super::account_stamp`].**
+///
+/// `from` is a token fingerprint ([`crate::plex::grant::account_key`]), not a token. Empty, or
+/// already the owner stamp, changes nothing. Used when a same-owner re-sign-in still holds the
+/// stored token, and by [`adopt_legacy_token_stamps`] for the session's own token. Idempotent:
+/// once the records carry the owner stamp, a second call finds nothing under `from`.
+pub fn rebind_account_records(session: &mut super::Session, from: &str) -> bool {
+    let to = super::account_stamp(session);
+    if from.is_empty() || to.is_empty() || from == to {
+        return false;
+    }
+    let mut changed = restamp_memory(&mut session.prefs.track_memory, from, &to);
+    changed |= restamp_memory(&mut session.prefs.subtitle_offsets, from, &to);
+    changed |= restamp_profile_prefs(&mut session.prefs.profile_prefs, from, &to);
+    changed |= restamp_consent(&mut session.prefs.plaintext_consent, from, &to);
+    changed
+}
+
+/// **Adopt records an older build stamped with this session's token**, onto the owner stamp.
+///
+/// No-op when the roster names no owner (the stamp already is the token fingerprint) and when
+/// the records have already moved. A stamp that is not this session's token fingerprint is left
+/// where it is: that is another account's, or a token this session no longer holds.
+pub fn adopt_legacy_token_stamps(session: &mut super::Session) -> bool {
+    let from = crate::plex::grant::account_key(&session.account_token);
+    rebind_account_records(session, &from)
 }
 
 // ---- the household budget: one eviction rule, shared by the write door and the document guard ----

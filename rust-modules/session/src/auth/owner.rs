@@ -141,9 +141,10 @@ pub struct ProfilePublication {
     pub epoch: u64,
     pub profile: Option<UserRef>,
     pub scope: ProfileScope,
-    /// `grant::account_key` of the account token the profile is published under: the half of the
-    /// seat (`plex::session::Seat`) that says which sign-in the profile belongs to. Empty with no
-    /// account token, and in a recording made before the field existed. An empty stamp is left off
+    /// The account stamp the profile is published under ([`plx_plex::plex::session::account_stamp`]):
+    /// the half of the seat (`plex::session::Seat`) that says which sign-in the profile belongs to.
+    /// The token fingerprint while the roster names no owner. Empty with no account token, and in
+    /// a recording made before the field existed. An empty stamp is left off
     /// the wire: a controlled replay grades the regenerated effect as complete canonical JSON
     /// against the committed recordings, which hold `{epoch, profile, scope}` alone.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -612,7 +613,7 @@ pub enum SessionFx {
     BackReply { to: ReplyTo, resumed: bool },
     /// Record the person's plaintext answer for one server: this launch's grant authority
     /// (`plex::grant::answer`) and the persisted choice (`Preferences::plaintext_consent`), under
-    /// `account` — `plex::grant::account_key` of the account signed in when it was given.
+    /// `account` — [`plex::session::account_stamp`] of the account signed in when it was given.
     PlaintextAnswer { machine_id: String, choice: plx_plex::plex::session::PlaintextChoice, account: String },
     /// Read the session cache's authority once and install it (`plex::session::refresh_cache_job`),
     /// installing only while the cache is still at `generation`. The adapter answers EVERY one of
@@ -2456,7 +2457,7 @@ let (req, arrival, terminal, plan, delta,): (u32, u64, bool, CommitPlan, CommitD
 
         use plx_plex::plex::session::PlaintextChoice;
         if self.state.phase() == Phase::Error {
-            let account = plx_plex::plex::grant::account_key(&self.common.persisted.account_token);
+            let account = plx_plex::plex::session::account_stamp(&self.common.persisted);
             let answered = self.state.plaintext().filter(|v| v.offers()
                 && matches!(v.choice, PlaintextChoice::Declined | PlaintextChoice::Revoked));
             if let (Some(v), false) = (answered, account.is_empty()) {
@@ -2542,7 +2543,7 @@ let (profile,): (Option<UserRef>,) = (Some(self.common.persisted.user.clone()),)
         self.common.active_profile = profile;
         fx.push(SessionFx::PublishProfile(ProfilePublication {
             epoch: self.common.epoch, profile: self.common.active_profile.clone(), scope: self.common.profile_scope,
-            stamp: plx_plex::plex::grant::account_key(&self.common.persisted.account_token),
+            stamp: plx_plex::plex::session::account_stamp(&self.common.persisted),
         }));
 
 };
@@ -2764,7 +2765,7 @@ let (profile,): (Option<UserRef>,) = (None,);
         self.common.active_profile = profile;
         fx.push(SessionFx::PublishProfile(ProfilePublication {
             epoch: self.common.epoch, profile: self.common.active_profile.clone(), scope: self.common.profile_scope,
-            stamp: plx_plex::plex::grant::account_key(&self.common.persisted.account_token),
+            stamp: plx_plex::plex::session::account_stamp(&self.common.persisted),
         }));
 
 }; }
@@ -2988,7 +2989,7 @@ let (profile,): (Option<UserRef>,) = (None,);
         self.common.active_profile = profile;
         fx.push(SessionFx::PublishProfile(ProfilePublication {
             epoch: self.common.epoch, profile: self.common.active_profile.clone(), scope: self.common.profile_scope,
-            stamp: plx_plex::plex::grant::account_key(&self.common.persisted.account_token),
+            stamp: plx_plex::plex::session::account_stamp(&self.common.persisted),
         }));
 
 };
@@ -3042,7 +3043,7 @@ let (profile,): (Option<UserRef>,) = (None,);
         self.common.active_profile = profile;
         fx.push(SessionFx::PublishProfile(ProfilePublication {
             epoch: self.common.epoch, profile: self.common.active_profile.clone(), scope: self.common.profile_scope,
-            stamp: plx_plex::plex::grant::account_key(&self.common.persisted.account_token),
+            stamp: plx_plex::plex::session::account_stamp(&self.common.persisted),
         }));
 
 };
@@ -3094,7 +3095,7 @@ let (sid,): (plx_plex::plex::ServerId,) = (*sid,);
 let (machine_id, choice, sid,): (&str, plx_plex::plex::session::PlaintextChoice, Option<plx_plex::plex::ServerId>,) = (machine_id, *choice, *sid,);
 
         use plx_plex::plex::session::PlaintextChoice;
-        let account = plx_plex::plex::grant::account_key(&self.common.persisted.account_token);
+        let account = plx_plex::plex::session::account_stamp(&self.common.persisted);
         if account.is_empty() || machine_id.is_empty() || choice == PlaintextChoice::Undecided {
             break 'answer_plaintext false;
         }
@@ -3319,7 +3320,7 @@ let (profile,): (Option<UserRef>,) = (None,);
         self.common.active_profile = profile;
         fx.push(SessionFx::PublishProfile(ProfilePublication {
             epoch: self.common.epoch, profile: self.common.active_profile.clone(), scope: self.common.profile_scope,
-            stamp: plx_plex::plex::grant::account_key(&self.common.persisted.account_token),
+            stamp: plx_plex::plex::session::account_stamp(&self.common.persisted),
         }));
 
 };
@@ -3414,7 +3415,7 @@ let (profile,): (Option<UserRef>,) = (Some(self.common.persisted.user.clone()),)
         self.common.active_profile = profile;
         fx.push(SessionFx::PublishProfile(ProfilePublication {
             epoch: self.common.epoch, profile: self.common.active_profile.clone(), scope: self.common.profile_scope,
-            stamp: plx_plex::plex::grant::account_key(&self.common.persisted.account_token),
+            stamp: plx_plex::plex::session::account_stamp(&self.common.persisted),
         }));
 
 };
@@ -3523,7 +3524,7 @@ let (profile,): (Option<UserRef>,) = (Some(self.common.persisted.user.clone()),)
         self.common.active_profile = profile;
         fx.push(SessionFx::PublishProfile(ProfilePublication {
             epoch: self.common.epoch, profile: self.common.active_profile.clone(), scope: self.common.profile_scope,
-            stamp: plx_plex::plex::grant::account_key(&self.common.persisted.account_token),
+            stamp: plx_plex::plex::session::account_stamp(&self.common.persisted),
         }));
 
 };
@@ -3557,7 +3558,7 @@ let (profile,): (Option<UserRef>,) = (Some(self.common.persisted.user.clone()),)
         self.common.active_profile = profile;
         fx.push(SessionFx::PublishProfile(ProfilePublication {
             epoch: self.common.epoch, profile: self.common.active_profile.clone(), scope: self.common.profile_scope,
-            stamp: plx_plex::plex::grant::account_key(&self.common.persisted.account_token),
+            stamp: plx_plex::plex::session::account_stamp(&self.common.persisted),
         }));
 
 };
@@ -4704,7 +4705,7 @@ let (profile,): (Option<UserRef>,) = (None,);
         self.common.active_profile = profile;
         fx.push(SessionFx::PublishProfile(ProfilePublication {
             epoch: self.common.epoch, profile: self.common.active_profile.clone(), scope: self.common.profile_scope,
-            stamp: plx_plex::plex::grant::account_key(&self.common.persisted.account_token),
+            stamp: plx_plex::plex::session::account_stamp(&self.common.persisted),
         }));
 
 };
