@@ -1,0 +1,9 @@
+{"updated":"2026-11-25T06:03:25Z",
+"ci":[
+{"id":45556827297,"at":"2026-11-25T05:54:46Z","sha":"85234ae11","title":"Add a Watchlist action to filmography credits","pr":1418,"conclusion":"success","attempt":1,"jobs":{"which gates apply":5,"host unit tests (default features)":436,"host harness tests":208,"armv7 cross-build and artifact assertions":485,"host unit tests (hostsim)":226,"host python/shell/C gates":284,"host lint + type-checks":253,"host checks (NOT a device gate)":2,"cross-build (armv7) + artifact assertions":3}}
+],
+"sim":[],
+"nightly":[],
+"cancelled":{},
+"daily":[],
+"flaky":[]}
