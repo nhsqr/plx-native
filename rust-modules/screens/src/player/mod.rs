@@ -907,9 +907,11 @@ impl<H: PlayerLike + crate::registry::MetadataLike> Machine<H> for PlayerScreen 
                         // Watch is the cancel of an automatic intro. A restore or a reconcile can
                         // land there while the row is still the discs (Previous is also index 0);
                         // that seat is not the viewer reaching for Watch. A direction, a pointer
-                        // and an accessibility move are.
+                        // and an accessibility move are. A paused or loading intro still waits and
+                        // resumes its countdown, as it always has.
                         if self.slot.is_automatic_skip()
                             && btn == up_next::BTN_CREDITS
+                            && !self.model.paused && !self.model.loading
                             && matches!(*by, By::Dir | By::Pointer | By::Script)
                         {
                             self.decline_pair();
@@ -1645,14 +1647,6 @@ impl PlayerScreen {
                         let fwd = matches!(key, consts::Key::Right { .. });
                         if self.scrub.key.release_pending() && !self.scrub.key.continues(fwd, now) {
                             self.end_hold("a different press settled the release");
-                        }
-                        // The row is the FocusEngine's. Returning here would swallow the press
-                        // and the viewer could never walk from Skip to Watch.
-                        if input::scrub_press(self.hud.visible_at_press, self.hud.nav.focus, true)
-                            == input::ScrubPress::Row
-                        {
-                            self.hud.extend(now, input::HUD_LINGER_MS);
-                            return Handled::No;
                         }
                         self.key_scrub_fresh(ps, key, now, fx, meta, interval)
                     }
