@@ -71,7 +71,7 @@ use plx_machine::machine::{
 };
 use plx_machine::present::Present;
 use plx_ui::screen::{
-    At, FocusSource, ReturnState, Screen, ScreenEvent,
+    At, FocusSource, Focusable, ReturnState, Screen, ScreenEvent,
 };
 
 struct LibraryPageVisit {
@@ -595,6 +595,10 @@ pub(crate) struct Bridge<'a> {
 /// Per-App publications, capture scratch and resource bookkeeping, never machine owners.
 /// These remain separate from RuntimeOwners and are lent at the same App boundary.
 pub(crate) struct BridgeRetained {
+    #[cfg(feature = "devtriggers")]
+    api_profile_correlation: u32,
+    #[cfg(feature = "devtriggers")]
+    api_profile_admission: Option<(u32, Option<u64>)>,
     marker_access: super::preferences::MarkerAccessRunner,
     marker_prefs: plx_appkit::skip_policy::MarkerPrefsView,
     marker_now: u32,
@@ -792,6 +796,18 @@ impl Bridge<'_> {
 }
 
 impl BridgeRetained {
+    #[cfg(feature = "devtriggers")]
+    pub(super) fn api_profile_reply_to(&mut self) -> plx_session::auth::owner::ReplyTo {
+        self.api_profile_correlation = self.api_profile_correlation.wrapping_add(1);
+        self.api_profile_admission = None;
+        plx_session::auth::owner::ReplyTo { instance: 0, correlation: self.api_profile_correlation }
+    }
+
+    #[cfg(feature = "devtriggers")]
+    pub(super) fn take_api_profile_admission(&mut self) -> Option<(u32, Option<u64>)> {
+        self.api_profile_admission.take()
+    }
+
     #[cfg(test)]
     pub(super) fn fixture_views<'a>(&'a self, auth: &'a plx_session::auth::SessionMachine,
         stores: &'a plx_data::stores::Stores) -> AppViews<'a> {
@@ -983,6 +999,10 @@ impl BridgeRetained {
             recorded_clients: std::collections::BTreeMap::new(),
             initial_subhash: 0,
 
+            #[cfg(feature = "devtriggers")]
+            api_profile_correlation: 0,
+            #[cfg(feature = "devtriggers")]
+            api_profile_admission: None,
             session_ready: None,
             seat_watch: SeatWatch::new(),
 
@@ -1872,6 +1892,13 @@ impl Bridge<'_> {
         parts.owner = plx_machine::machine::InputOwner::Entry(entry);
         parts.focus.current = ret.focus;
         let cx = parts.cx::<AppHost>(self.views(), &self.retained.measure);
+        if let Some(page) = screen.downcast_ref::<plx_screens::filmography::FilmographyScreen>() {
+            let hex = page.watchlist_hex(ret.focus)?;
+            let focus = ret.focus?;
+            let rect = Focusable::<AppHost>::place(page, &focus.elem, &cx, At::Drawn)?.rect;
+            return Some(strip_menu_arg(plx_plex::plex::ServerId::UNSET, "",
+                ItemMenuKind::WatchlistAdd { hex }, entry, ret.focus, Some(rect)));
+        }
         if let Some(page) = screen.downcast_ref::<plx_screens::detail::DetailScreen>() {
             let sid = match &e.arg { AppArg::Content(ContentArg::Detail { sid, .. }) => *sid, _ => return None };
             let rect = page.focused_rect::<AppHost>(ret.focus, &cx, At::Drawn);
@@ -3607,6 +3634,12 @@ impl Bridge<'_> {
             SessionFx::RestartReply { to, accepted } => out.push(Fx::Deliver(
                 MachineId::Instance(InstanceId(to.instance)), Delivery::Screen(ScreenEvent::Async(
                     RequestId(to.correlation), AppMsg::RestartReply { correlation: to.correlation, accepted })))),
+            #[cfg(feature = "devtriggers")]
+            SessionFx::SelectionReply { to, accepted, flow_epoch } if to.instance == 0 => {
+                if to.correlation == self.retained.api_profile_correlation {
+                    self.retained.api_profile_admission = Some((to.correlation, accepted.then_some(flow_epoch)));
+                }
+            }
             SessionFx::SelectionReply { to, accepted, flow_epoch } => out.push(Fx::Deliver(
                 MachineId::Instance(InstanceId(to.instance)), Delivery::Screen(ScreenEvent::Async(
                     RequestId(to.correlation), AppMsg::SelectionReply { correlation: to.correlation, accepted, flow_epoch })))),
