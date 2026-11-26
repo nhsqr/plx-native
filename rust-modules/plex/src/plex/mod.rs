@@ -33,6 +33,8 @@ mod servers;
 mod hubs;
 mod library;
 pub mod collections;
+/// Live TV reads: DVRs, their guide lineups and what is airing now. `docs/pms-api.md` §10.
+pub mod livetv;
 /// Agent-backed subtitle search & download. `docs/pms-api.md` §8 is the verified contract; the
 /// bundled OpenAPI spec is wrong about this endpoint and must not be read as authority for it.
 pub mod subtitles;
@@ -83,6 +85,7 @@ pub mod grant;
 // persisted answer — no store, no screen — so the household default, the recorded answer and the
 // never-empty floor are graded on the host rather than observed on a television.
 pub mod pins;
+pub mod library_order;
 
 // The plex.tv METADATA PROVIDER (`discover.provider.plex.tv`) — a third service, but one that
 // shares the account API's transport + identity headers exactly, so it only adds an

@@ -741,8 +741,8 @@ E10-E13 are later runs on the same emulator. Measured on the emulator only; no r
   Samsung; ES2 context, RGBA8888; `eglMakeCurrent` on the Rust render thread; `eglSwapInterval(0)`
   then 1; renderer "YaGL GLESv2"; first frame presented, `glGetError` 0. The emulator draws through
   YaGL over llvmpipe, so this is no GPU, compositor or frame-rate result.
-- E7. Keys. Injected with `ecp-cli` as evdev events: Right keycode 114, Left 113, Up 111, Down 116 and
-  Return 36, reported as Ecore key names. Every press changed the colour. Key to frame took 8-30 ms (key
+- E7. Keys. Injected with `ecp-cli keycode`, which takes evdev numbers (Right 106, Left 105, Up 103, Down 108,
+  Return 28); the app reported X keycodes (evdev + 8: Right 114, Left 113, Up 111, Down 116, Return 36) and Ecore key names. Every press changed the colour. Key to frame took 8-30 ms (key
   on the host thread, colour on the render thread): an emulator figure, not a retail one. Back, media
   keys, digits and the channel rocker were not exercised by this run (the colour button came later, E11), and a
   retail remote's codes are not measured.
@@ -1235,7 +1235,7 @@ Ecore names to `remote_token_key` pairs".
   shared; thread-affine state (window, GL context, the Ecore handles) lives only in a `Surface` that
   `Shell::open(&self, &MainThread, &OpenAsk)` returns on the loop thread and that the app owns inside `App`.
 - Events. The platform reports input through `EventSink` (`key(Option<Action>, Option<RawKey>, Edge) -> bool`, `text`,
-  `pointer`, `wheel`, `lifecycle`, `quit`); the APP converts to its private `HostEvent` (a private `HostQueue`, the
+  `keyboard_dismissed`, `pointer`, `wheel`, `lifecycle`, `quit`); the APP converts to its private `HostEvent` (a private `HostQueue`, the
   one place), so the owner's decision that the event API stays private holds. `Action`, `RawKey` and `Edge` are
   lower-layer types: `RawKey` moved to `plx_ui::consts` beside `raw_pair` and `action_of` (a `pub(crate) use` keeps
   the app's old path). `Surface::deliver(&self, &mut dyn EventSink)` is ADDITIVE, beside `Surface::poll`: `deliver` is
@@ -2019,29 +2019,33 @@ W3d. Neutral types (L15b item 2 prerequisites; part of item 3).
   `DriverSet` + `UriDriver` over a `HostPlayer` port that `hosted` implements; every request and event carries the epoch
   and a completion after a stop is dropped. Capabilities: progressive URI, pause, seek, and `audio_track` (a deviation
   from D4's "progressive, pause, seek only": the planner issues `SelectTrack` for any title whose audio stream the server
-  states, so the offer of a title fails without it; the driver settles that request for the source's one audio stream by
-  construction, not on native evidence, and `TizenQualifier` certifies ONLY a source with a single audio stream until the
-  retail default stream is measured). `TizenQualifier` certifies a source only where Standard would direct-play it
-  and never a converted PMS output; **the planner refuses most real titles before the qualifier is asked**: `subtitle_choice = Off`
-  (any subtitle stream, none selected) is `SubtitleOff`, a selected embedded subtitle fails `subtitle_track`, a sidecar is
-  `requires_client_subtitle`, Boost Dialog, Auto on a non-local link and a relay are refused the same way, and with no Feed
-  and `qualify_pms` Unknown each ends as `NoQualifiedBackend` (a resolver test pins `SubtitleOff`); whether the native player
-  renders an embedded subtitle when none is set is an OPEN measurement, and `SubtitleOff` is not allowed until it is; a track pick
+  states, so the offer of a title fails without it; the driver settles a Part's sole audio stream by construction (no host
+  call, as before the verb), and for a stream with siblings asks the host player for the native index whose language (`PLAYER_AUDIO_LANGUAGE`, posted before PREPARED) is the stream's, never by position alone
+  (`PLX_HOST_PLAYER_VERB_AUDIO_TRACK`), refuses one it cannot tell, and settles it on the host's `PLAYER_TRACK` answer, and
+  `TizenQualifier` certifies the selected stream wherever it sits; whether the native index follows PMS's order on a retail
+  set is unmeasured, `docs/tizen.md`, "The audio track is selected"), and `subtitle_off` (a second deviation, below). `TizenQualifier` certifies a source only where Standard would direct-play it
+  and never a converted PMS output. `subtitle_choice = Off` (any subtitle stream, none selected) is carried: the driver states
+  `subtitle_off` (the host gives the player no subtitle, and the emulator run in `docs/tizen.md`, "Subtitles off", showed
+  none drawn from a default-flagged embedded track), so `SubtitleOff` is refused only on evidence without it. A selected
+  embedded subtitle still fails `subtitle_track`, a sidecar is `requires_client_subtitle`, and Boost Dialog, Auto on a
+  non-local link and a relay are refused before the qualifier is asked; with no Feed and `qualify_pms` Unknown each ends as
+  `NoQualifiedBackend` (the resolver tests pin them); a track pick
   the driver cannot carry is refused by the shared reconfigure door instead of replacing the playing title (and a Quality rung, which only a Feed or a converting provider can carry, is neither offered nor applied: `PlaybackSession::quality_pick_carriable`); a stall or failure of the original is not re-resolved on a composition with no Feed and no converting provider (`can_retry_uri_after_release`), so the viewer reads the stall and not a refusal; the parked attempt's `stopped` timeline goes out at the restore's retire and at an exit, at its own position; the codec table stays `Caps::assumed()` (D8). `player::MEDIA` replaces `NO_MEDIA`
   behind `uri`; `mk/platform-tizen.mk` builds with it (`TIZEN_URI=0` builds without), and the identity line says which build it is.
   The shared conformance suite (`plx_playback_contract::uri_conformance`, D7) runs over `FakeUriDriver` and this driver, and
   the mock's `--extra-media-video-only` serves a local video-only file for the audio-less emulator. Still open: an emulator run of it with the video-only mock; H6 on a
-  retail set (decode, sound, armv7, the TV-menu round trip); a picture through this driver (the window's alpha and the straighten pass are PR B2's; this driver emits no `Presented`); the retail player's default audio stream; and how a real PMS answers `X-Plex-Platform: Tizen`.
+  retail set (decode, sound, armv7, the TV-menu round trip); a picture through this driver (the window's alpha and the straighten pass are PR B2's; this driver emits no `Presented`); the retail player's native audio order, language codes and `player_select_track` in READY (`docs/tizen.md`, "The audio track is selected", "Not measured"); and how a real PMS answers `X-Plex-Platform: Tizen`.
 - As landed (PR B2, the video plane under our UI and Home): measured on the TV 10.0 x86_64 emulator 2026-11-22 (scratch
   probe; emulator only): (a) with the window alpha ON the native player's OVERLAY video shows only through pixels the frame
   clears to (0, 0, 0, 0), the UI around it intact (the player route clears that way whether or not a plane is bound, `app/run.rs`
   `fr.player`, and `PlayerScreen` has no ground: measured at `3d56d35b2` with no plane ever bound, the "Playback failed" read-out sits on
-  exact (0, 0, 0) black on the emulator, whose compositor had nothing under the window; a retail set's answer is H6's); (b) the video plane mixes STRAIGHT alpha (pixel-exact: a straight
+  exact (0, 0, 0) black on the emulator, whose compositor had nothing under the window; a retail set's answer is H6's); (b) the video plane mixes STRAIGHT alpha (measured with the window translucent, not re-taken for the opaque `has_video` window; pixel-exact: a straight
   (255, 255, 255, 128) strip is a 50 % veil over it) while window-over-window composition is premultiplied, which is webOS's split, so
   the existing straighten pass and `frame_clear_through` / `opaque_route` chain are the answer, not a new one (D6); (c) the player
   raises nothing at OnPause: `player_pause` there and `player_start` at OnResume resume in about 130 ms at the same position, the picture
-  back when the window is (about 2 s). The code: `ecore::WINDOW_ALPHA` = 1 at window creation (the platform's frames go over a video
-  plane; a window flag, so `Shell::opaque_route` stays a stated no-op); the straighten COPY program is its own source,
+  back when the window is (about 2 s). The code: the window was made translucent at creation (alpha 1), and since 2026-11-26 it is opaque and states
+  `has_video` instead (`ecore::WindowMode`; a translucent window shows the TV's home screen through its alpha-0 pixels on a
+  retail set, `docs/tizen.md`). The mode is a window flag either way, so `Shell::opaque_route` stays a stated no-op; the straighten COPY program is its own source,
   `fs_straighten_copy.frag`, with no preprocessor directive (the suspect above: the shared file's `#extension` lines in branches not
   taken), the fetch file keeps the two fetch variants, a test pins the arithmetic equal; `PlxPlayer.PauseForHome` / `ResumeAfterHome`
   (C#, video thread) pause what is playing at OnPause (the OnResume start was dropped in the PR B1 review round: the library owns the resume); an accepted CLOSE retires its epoch at the

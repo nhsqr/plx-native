@@ -2665,7 +2665,7 @@ mod off_frame_release_tests {
         assert_eq!(shape.kind.code(), "release_timeout");
         let actions = crate::player::failure_actions(
             shape.kind,
-            crate::player::FailureContext { forced: false, can_retry: true, quality_carriable: true, repair_idle: true },
+            crate::player::FailureContext { forced: false, can_retry: true, quality_carriable: true, repair_idle: true, tracks_available: false },
         );
         assert!(actions.contains(&crate::player::FailureAction::TryAgain), "{actions:?}");
 
@@ -4062,7 +4062,7 @@ mod load_in_flight_tests {
         assert_eq!(shape.kind, crate::player::FailureKind::LoadTimeout);
         let actions = crate::player::failure_actions(
             shape.kind,
-            crate::player::FailureContext { forced: false, can_retry: true, quality_carriable: true, repair_idle: true },
+            crate::player::FailureContext { forced: false, can_retry: true, quality_carriable: true, repair_idle: true, tracks_available: false },
         );
         assert!(
             actions.contains(&crate::player::FailureAction::TryAgain),
@@ -4485,6 +4485,7 @@ mod sink_envelope_tests {
             "a faster row never raises the ceiling"
         );
     }
+
     #[test]
     fn audio_payload_names_dts_and_refuses_unsupported_formats() {
         assert_eq!(audio_payload_codec("dts"), Some(("DTS", 4)));

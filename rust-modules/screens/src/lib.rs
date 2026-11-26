@@ -17,6 +17,7 @@ pub mod account_menu;
 pub mod alt_sources;
 pub mod tracks_panel;
 pub mod versions_panel; // the Detail hero's Play Version list
+pub mod preplay_panel; // Audio & Subtitles before playback (#1532)
 pub mod consent;
 pub mod catalog; // the catalog page's view-model (plan W6)
 pub mod collection;
@@ -44,3 +45,5 @@ pub mod settings;
 pub mod preferences;
 pub mod hud_settings; // the Player HUD page: installed packages, the drop folder, the chosen HUD
 pub mod watchlist;
+/// The Live TV page (the strip's "TV en directo"): the server's channels as a poster grid.
+pub mod livetv;

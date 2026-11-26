@@ -43,9 +43,9 @@ use plx_plex::plex::session::{
     UnderPostersPref,
 };
 use plx_plex::plex::session::prefs::{
-    MemoryEntry, ProfileKeyed, ProfileList, ProfileMemory, ProfileRecords, SettingsWrite, TrackMemoryEntry,
+    MemoryEntry, ProfileKeyed, ProfileList, ProfileMemory, ProfileRecords, RecentChannelEntry, SettingsWrite, TrackMemoryEntry,
 };
-use plx_plex::plex::session::{self, Seat, Session, SubtitleOffsetEntry};
+use plx_plex::plex::session::{self, Seat, Session, SubtitleOffsetEntry, VersionChoiceEntry};
 use plx_plex::plex::AudioEnhancements;
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU16, Ordering::Relaxed};
@@ -621,10 +621,27 @@ fn reseed_mirror<E: MemoryTenant>(record: &Session) {
 }
 
 /// Every tenant of the memory door, once. (The profiles' own player values are reseeded beside them.)
-pub const MEMORY_ROWS: &[MemoryRow] = &[MemoryRow::of::<SubtitleOffsetEntry>(), MemoryRow::of::<TrackMemoryEntry>()];
+pub const MEMORY_ROWS: &[MemoryRow] =
+    &[
+        MemoryRow::of::<SubtitleOffsetEntry>(),
+        MemoryRow::of::<TrackMemoryEntry>(),
+        MemoryRow::of::<VersionChoiceEntry>(),
+        MemoryRow::of::<RecentChannelEntry>(),
+    ];
 
 static SUBTITLE_OFFSETS: MemoryMirror<SubtitleOffsetEntry> = MemoryMirror::new();
 static TRACK_MEMORY: MemoryMirror<TrackMemoryEntry> = MemoryMirror::new();
+static VERSION_CHOICES: MemoryMirror<VersionChoiceEntry> = MemoryMirror::new();
+static RECENT_CHANNELS: MemoryMirror<RecentChannelEntry> = MemoryMirror::new();
+
+impl MemoryTenant for VersionChoiceEntry {
+    fn mirror() -> &'static MemoryMirror<Self> {
+        &VERSION_CHOICES
+    }
+    fn log_label() -> &'static str {
+        "version choice"
+    }
+}
 
 impl MemoryTenant for SubtitleOffsetEntry {
     fn mirror() -> &'static MemoryMirror<Self> {
@@ -656,14 +673,15 @@ impl MemoryTenant for SubtitleOffsetEntry {
 /// published"; the memory door asks the seat instead, so a run that never seated anybody (a dev
 /// token, a replay) cannot write to the owner's record of whatever account is on disk.
 ///
-/// Both tenants are account-bound, so the mirror write and the queued file write carry the account
+/// Every tenant is account-bound, so the mirror write and the queued file write carry the account
 /// stamp (the mirror's seed, and the file's [`account_stamp`](plx_plex::plex::session::account_stamp))
 /// and [`recall`] reads under it. A queued write whose seed is neither the file's stamp nor its
 /// token fingerprint is dropped. `track_memory`
 /// is read through [`recall`] and [`recall_all`] and written here, by `commit_audio_pick` and
 /// `commit_subtitle_pick` (the track menu's pick) and by nothing else but the harness's
 /// `plxnative-trackmemory=clear` and `=fill` (`dev::scenarios::arm_track_memory`), which remove and
-/// write entries through this same door.
+/// write entries through this same door; `recent_channels` is read through [`recall_all`] and written
+/// here, by the app when a live channel's tune is admitted (`Bridge::note_live_tune`), where it is the ONE list: the Live TV store holds none of its own.
 pub fn remember<E: MemoryTenant>(
     user: &str,
     key: E::Key,
@@ -711,6 +729,15 @@ impl MemoryTenant for TrackMemoryEntry {
     }
 }
 
+impl MemoryTenant for RecentChannelEntry {
+    fn mirror() -> &'static MemoryMirror<Self> {
+        &RECENT_CHANNELS
+    }
+    fn log_label() -> &'static str {
+        "recent channels"
+    }
+}
+
 /// Seed `E`'s mirror from `record` whatever it was seeded under before, so a test does not inherit
 /// another test's remembered entries (the mirror is a process global, and a restore under an
 /// unchanged tenure and stamp deliberately keeps it).
@@ -750,7 +777,7 @@ pub fn recall<E: MemoryTenant>(user: &str, key: &E::Key) -> Option<E> {
 /// without a stamp. It is the record
 /// stamped as the mirror is: a tenant that [adopts](MemoryEntry::ADOPTS_UNSTAMPED) unstamped
 /// records does not show the ones not yet adopted here (only [`recall`] falls back to them), and
-/// only `track_memory` is read this way.
+/// only `track_memory` and `recent_channels` are read this way.
 pub fn recall_all<E: MemoryTenant>(user: &str) -> Vec<E> {
     if !session::is_seated_as(user) {
         return Vec::new();

@@ -624,6 +624,35 @@ fn an_older_builds_token_stamp_is_adopted_once() {
     assert!(loaded.prefs.profile_prefs.iter().all(|r| r.account != legacy));
 }
 
+/// **Version choices and recent channels move with the rest.** They are account-bound memory
+/// tenants too, so an older build's token-stamped records land on the owner stamp, not left
+/// behind under a stamp the next write prunes.
+#[test]
+fn an_older_builds_token_stamp_moves_version_choices_and_recent_channels() {
+    let mut session = Session {
+        client_id: "cid-1".into(), account_token: "token-a".into(), home_users: roster_of(7), ..Default::default()
+    };
+    let legacy = crate::plex::grant::account_key("token-a");
+    session.prefs.version_choices.push(prefs::ProfileList {
+        user: String::new(),
+        account: legacy.clone(),
+        items: vec![VersionChoiceEntry {
+            machine_id: "m".into(), rating_key: "rk".into(), media_id: 2, extensions: Default::default(),
+        }],
+        ..Default::default()
+    });
+    session.prefs.recent_channels.push(prefs::ProfileList {
+        user: String::new(),
+        account: legacy.clone(),
+        items: vec![prefs::RecentChannelEntry { machine_id: "m".into(), dvr: "d".into(), channel: "5".into() }],
+        ..Default::default()
+    });
+    let owner = account_stamp(&session);
+    assert!(prefs::adopt_legacy_token_stamps(&mut session));
+    assert!(session.prefs.version_choices.iter().all(|r| r.account == owner), "{:?}", session.prefs.version_choices);
+    assert!(session.prefs.recent_channels.iter().all(|r| r.account == owner), "{:?}", session.prefs.recent_channels);
+}
+
 /// A known different owner reads none of the four, and a later sign-in of that owner does not
 /// find them either. An unnamed roster neither moves them nor drops them.
 #[test]

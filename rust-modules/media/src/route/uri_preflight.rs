@@ -15,6 +15,10 @@ use plx_playback_contract::{Capabilities, Fidelity, Requirements, SourceKind, Tr
 
 use super::SourceSelection;
 
+/// Whether two language tags name one language (ISO 639-1, 639-2/B and 639-2/T spellings fold together): the
+/// shared test, re-exported for a URI driver that checks a native track's language against [`OriginalRequest::audio_language`].
+pub use plx_data::metadata::lang_matches;
+
 /// The exact selected subtitle's source format and placement. A native track index alone does
 /// not establish that this firmware renders its codec.
 #[derive(Clone, PartialEq, Eq)]
@@ -288,11 +292,19 @@ pub struct OriginalRequest {
     ///
     /// HYPOTHESIS, unmeasured on the 4.5 service: that this position is also the native track
     /// index the service names in `audioInfo.track` and takes in `selectTrack`. A qualifier may map
-    /// it to a [`NativeTrackIndex`] only for a source it knows lists its audio in the Part's order;
+    /// it to a [`NativeTrackIndex`] only for a source it knows lists its audio in the Part's order,
+    /// or together with a [`NativeTrackCheck`](plx_playback_contract::uri::NativeTrackCheck) its driver verifies before trusting the index (Tizen
+    /// states the stream's language, `audio_language`);
     /// `selection.audio_sid` stays the stream's identity, this is only where it sits.
     pub audio_ordinal: Option<i64>,
     /// The exported-window service can enumerate multiple tracks in a different order from PMS.
     pub has_multiple_audio_tracks: bool,
+    /// The selected audio stream's language as PMS states it (`languageCode`, ISO 639-2, e.g. `ger`); empty when no
+    /// stream is selected or PMS states none. The identity evidence a driver whose native track order is unproven
+    /// matches against the native track's own language ([`lang_matches`]) before it trusts [`audio_ordinal`].
+    ///
+    /// [`audio_ordinal`]: Self::audio_ordinal
+    pub audio_language: String,
     pub subtitle_source: Option<SourceSubtitle>,
     /// Off is an actual viewer choice, distinct from no subtitle streams being present.
     /// The current URI driver has no native disable operation.
@@ -728,7 +740,12 @@ impl ResolvePort {
         else if request.selection.audio_contract.any() { Some(UriDecline::AudioEnhancement) }
         else if request.requires_subtitle_burn { Some(UriDecline::SubtitleBurn) }
         else if request.requires_client_subtitle { Some(UriDecline::ClientSubtitle) }
-        else if request.subtitle_choice == TrackChoice::Off { Some(UriDecline::SubtitleOff) }
+        // Off is refused only where the driver cannot carry it: a pipeline that shows a default
+        // subtitle by itself (the webOS one) states `subtitle_off: false`.
+        else if request.subtitle_choice == TrackChoice::Off
+            && !(evidence.callable.subtitle_off && evidence.certified.subtitle_off) {
+            Some(UriDecline::SubtitleOff)
+        }
         else if request.dolby_vision.present
             && request.dolby_vision_mode == plx_plex::plex::session::DolbyVisionMode::Off {
             Some(UriDecline::DolbyVisionOff)
@@ -1170,7 +1187,7 @@ mod tests {
                     audio_track: TrackChoice::Selected(42),
                     subtitle_track: if request.selection.subtitle_sid > 0 {
                         TrackChoice::Selected(request.selection.subtitle_sid as u64)
-                    } else { TrackChoice::Unspecified } },
+                    } else { request.subtitle_choice } },
                 certified_dolby_vision: self.dovi,
                 certified_subtitle_source: self.subtitle.clone(),
                 expires_at: if self.expired { Instant::now() - std::time::Duration::from_secs(1) }
@@ -1189,7 +1206,7 @@ mod tests {
             video_codec: "h264".to_owned(), dolby_vision: plx_data::metadata::Dovi::NONE,
             dolby_vision_mode: plx_plex::plex::session::DolbyVisionMode::Auto,
             dolby_vision_base_layer_only: false, uri_opt_in,
-            standard: PLAYS, audio_codec: "aac".to_owned(), audio_ordinal: Some(1), has_multiple_audio_tracks: false,
+            standard: PLAYS, audio_codec: "aac".to_owned(), audio_ordinal: Some(1), has_multiple_audio_tracks: false, audio_language: String::new(),
             subtitle_source: None, subtitle_choice: TrackChoice::Unspecified,
             source_kbps: Some(4000), raster: Some((1280, 720)),
             requested_rate_permille: plx_playback_contract::RATE_NORMAL, resume_ns: 0,
@@ -1369,7 +1386,7 @@ mod tests {
             video_codec: "hevc".to_owned(), dolby_vision: dovi,
             dolby_vision_mode: plx_plex::plex::session::DolbyVisionMode::Auto,
             dolby_vision_base_layer_only: false, uri_opt_in: false,
-            standard: PLAYS, audio_codec: "ac3".to_owned(), audio_ordinal: Some(0), has_multiple_audio_tracks: false,
+            standard: PLAYS, audio_codec: "ac3".to_owned(), audio_ordinal: Some(0), has_multiple_audio_tracks: false, audio_language: String::new(),
             subtitle_source: None,
             subtitle_choice: TrackChoice::Unspecified,
             source_kbps: Some(4000), raster: Some((1920, 1080)),
@@ -1412,11 +1429,22 @@ mod tests {
         let render_proof = ResolvePort::new(evidence, Arc::new(Certified { dovi: None,
             subtitle: Some(source_subtitle.clone()), expired: false, mapped: true }));
         assert!(matches!(render_proof.qualify(&off, subtitle_request()), Verdict::Known(_)));
-        let mut off_request = request();
-        off_request.dolby_vision = plx_data::metadata::Dovi::NONE;
-        off_request.subtitle_choice = TrackChoice::Off;
-        assert!(matches!(render_proof.qualify(&off, off_request), Verdict::Refused(UriDecline::SubtitleOff)),
+        let off_request = || { let mut input = request(); input.dolby_vision = plx_data::metadata::Dovi::NONE;
+            input.subtitle_choice = TrackChoice::Off; input };
+        assert!(matches!(render_proof.qualify(&off, off_request()), Verdict::Refused(UriDecline::SubtitleOff)),
             "the native driver cannot disable an otherwise selectable subtitle");
+        // A driver that carries Off (its pipeline is given no subtitle, the Tizen host's) is asked, and certifies it.
+        let carries_off = Capabilities { subtitle_off: true, ..evidence.callable };
+        let off_evidence = ProductEvidence { callable: carries_off,
+            certified: Capabilities { subtitle_off: true, ..evidence.certified }, ..evidence };
+        let off_driver = ResolvePort::new(off_evidence, Arc::new(Certified { dovi: None,
+            subtitle: None, expired: false, mapped: true }));
+        assert!(matches!(off_driver.qualify(&off, off_request()), Verdict::Known(_)),
+            "Off is refused only where the driver cannot carry it");
+        // Callable is not enough: Off must also be certified.
+        let uncertified = ResolvePort::new(ProductEvidence { callable: carries_off, ..evidence },
+            Arc::new(Certified { dovi: None, subtitle: None, expired: false, mapped: true }));
+        assert!(matches!(uncertified.qualify(&off, off_request()), Verdict::Refused(UriDecline::SubtitleOff)));
     }
 
     // ---- why the Experimental engine did not take a play (`UriDecline`) ----

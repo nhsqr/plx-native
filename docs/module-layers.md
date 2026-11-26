@@ -133,7 +133,7 @@ base
 | plex | `plex http` | 26k | 72% |
 | telemetry | `telemetry diag` (the event schema) | 16k | 64% |
 | ui | `ui` (the library) | 51k | 47% |
-| data | `stores browse metadata person collection search subsearch viewstate viewledger pms watchlist catalog hudpacks` | 27k | 56% |
+| data | `stores browse metadata person collection livetv search subsearch viewstate viewledger pms watchlist catalog hudpacks` | 27k | 56% |
 | session | `auth` | 11k | 35% |
 | media | `ff` (a facade over `play_feed`'s demuxer) `abr curlio player route speed_audio`; `aq` and `hls` moved to `play_feed` | 56k | 49% |
 | appkit | `appkit` (the player panels and the Sources row several screens draw) | 13k | 32% |
@@ -196,7 +196,7 @@ container, not the server's decision, which the offer precedes), and for a conve
 `owp` is a nineteenth layer, declared the same way. Its crate is `plx_owp` (`rust-modules/owp/`); it
 names no other layer and no `plx_*` crate, so it can be used on its own: the Open Watch Party client protocol, sans-IO. It holds the JSON reader that keeps
 unpaired surrogate escapes visible to the checks, the message codec, the checks on names, room codes, the
-relay list, descriptors and room snapshots, the clock sync and the room timeline, each run against the
+relay list, descriptors and room snapshots, the clock sync, the room timeline, the reconciliation step and the matching ranking and walk, each run against the
 vendored conformance vectors in `rust-modules/owp/fixtures/`. The WebSocket under it is `plx_net::ws`; the
 application does not name the crate yet. `ci/check-deps.sh` reads the whole crate for the same IO and clock
 gates as every other layer, and as machine code.

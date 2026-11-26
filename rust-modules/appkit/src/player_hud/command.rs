@@ -217,6 +217,10 @@ impl HudCommand {
             | HudCommand::ToggleStats => true,
         }
     }
+
+    pub fn shown_live(self) -> bool {
+        matches!(self, Self::TogglePlay | Self::ToggleSection(Section::Info) | Self::ToggleStats)
+    }
 }
 
 /// The `by` of a `seek` item as the package wrote it: a nonzero integer of seconds, or the name `setting`.
