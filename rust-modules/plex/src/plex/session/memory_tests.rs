@@ -653,6 +653,50 @@ fn an_older_builds_token_stamp_moves_version_choices_and_recent_channels() {
     assert!(session.prefs.recent_channels.iter().all(|r| r.account == owner), "{:?}", session.prefs.recent_channels);
 }
 
+/// **Version choices and recent channels follow the owner both ways.** A same-owner re-sign-in
+/// keeps the records already on the owner stamp. A different owner drops them, the same drop as
+/// the older stamped lists: leaving them would hand the previous account's chosen file and
+/// recent channels back when that owner signs in again.
+#[test]
+fn a_different_owner_drops_version_choices_and_recent_channels_and_the_same_owner_keeps_them() {
+    let _serial = plx_base::testlock::serial();
+    let _root = TempSession::new("relogin-version-recent");
+    let mut first = Session {
+        client_id: "cid-1".into(), account_token: "token-a".into(), home_users: roster_of(7), ..Default::default()
+    };
+    let stamp = account_stamp(&first);
+    first.prefs.version_choices.push(prefs::ProfileList {
+        user: String::new(),
+        account: stamp.clone(),
+        items: vec![VersionChoiceEntry {
+            machine_id: "m".into(), rating_key: "rk".into(), media_id: 2, extensions: Default::default(),
+        }],
+        ..Default::default()
+    });
+    first.prefs.recent_channels.push(prefs::ProfileList {
+        user: String::new(),
+        account: stamp,
+        items: vec![prefs::RecentChannelEntry { machine_id: "m".into(), dvr: "d".into(), channel: "5".into() }],
+        ..Default::default()
+    });
+    save(&first);
+
+    login_with_roster("token-b", roster_of(7));
+    let kept = load();
+    assert_eq!(kept.account_token, "token-b");
+    assert_eq!(kept.prefs.version_choices.len(), 1, "the same owner keeps the chosen file");
+    assert_eq!(kept.prefs.version_choices[0].account, account_stamp(&kept));
+    assert_eq!(kept.prefs.version_choices[0].items[0].media_id, 2);
+    assert_eq!(kept.prefs.recent_channels.len(), 1, "and the recent channel");
+    assert_eq!(kept.prefs.recent_channels[0].account, account_stamp(&kept));
+    assert_eq!(kept.prefs.recent_channels[0].items[0].channel, "5");
+
+    login_with_roster("token-c", roster_of(8));
+    let other = load();
+    assert!(other.prefs.version_choices.is_empty(), "a different owner drops the version choice: {:?}", other.prefs.version_choices);
+    assert!(other.prefs.recent_channels.is_empty(), "and the recent channels: {:?}", other.prefs.recent_channels);
+}
+
 /// A known different owner reads none of the four, and a later sign-in of that owner does not
 /// find them either. An unnamed roster neither moves them nor drops them.
 #[test]

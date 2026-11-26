@@ -4734,25 +4734,21 @@ pub fn replace_after_reauthentication_guarded_with_outcome(
     // signing in again differs by token and must keep their pins, searches and library memory.
     // Unknown on either side (a roster not yet fetched, or one without a nameable admin) clears.
     //
-    // The four stamped lists follow the owner too, but they carry a stamp, so the rule is not
-    // "clear when unknown". A same owner moves records stamped with the stored token's
+    // The stamped account records follow the owner too, but they carry a stamp, so the rule is
+    // not "clear when unknown". A same owner moves records stamped with the stored token's
     // fingerprint onto the owner stamp ([`account_stamp`]); records already on that stamp stay.
-    // A known different owner drops the lists, so nothing of the previous account is left to
-    // read. An unnamed roster leaves them: moving them would hand them to whoever the unnamed
-    // token turns out to be, and dropping them would destroy the only copy. They stay unreadable
-    // under the new stamp until a write of a named owner prunes them.
+    // A known different owner drops every stamped list ([`prefs::drop_stamped_account_records`]),
+    // so nothing of the previous account is left to read. An unnamed roster leaves them: moving
+    // them would hand them to whoever the unnamed token turns out to be, and dropping them would
+    // destroy the only copy. They stay unreadable under the new stamp until a write of a named
+    // owner prunes them.
     if !cur.account_token.is_empty() && cur.account_token != next.account_token {
         match (owner_identity(&cur.home_users), owner_identity(&next.home_users)) {
             (Some(previous), Some(incoming)) if previous == incoming => {
                 prefs::rebind_account_records(&mut next, &super::grant::account_key(&cur.account_token));
                 prefs::adopt_legacy_token_stamps(&mut next);
             }
-            (Some(_), Some(_)) => {
-                next.prefs.track_memory.clear();
-                next.prefs.subtitle_offsets.clear();
-                next.prefs.profile_prefs.clear();
-                next.prefs.plaintext_consent.clear();
-            }
+            (Some(_), Some(_)) => prefs::drop_stamped_account_records(&mut next),
             _ => {}
         }
     }

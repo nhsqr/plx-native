@@ -1116,6 +1116,43 @@ fn restamp_consent(list: &mut Vec<super::PlaintextConsent>, from: &str, to: &str
     changed
 }
 
+/// One account-bound list the owner stamp moves or a different owner drops. The memory-door
+/// tenants, the per-profile settings and plaintext consent are different types; [`stamped_accounts`]
+/// is the one list [`rebind_account_records`] and [`drop_stamped_account_records`] walk, so a new
+/// tenant is named once.
+trait StampedAccount {
+    fn clear_records(&mut self);
+    fn restamp_records(&mut self, from: &str, to: &str) -> bool;
+}
+
+impl<E: MemoryEntry> StampedAccount for Vec<ProfileList<E>> {
+    fn clear_records(&mut self) { self.clear(); }
+    fn restamp_records(&mut self, from: &str, to: &str) -> bool { restamp_memory(self, from, to) }
+}
+
+impl StampedAccount for Vec<ProfilePrefsRecord> {
+    fn clear_records(&mut self) { self.clear(); }
+    fn restamp_records(&mut self, from: &str, to: &str) -> bool { restamp_profile_prefs(self, from, to) }
+}
+
+impl StampedAccount for Vec<PlaintextConsent> {
+    fn clear_records(&mut self) { self.clear(); }
+    fn restamp_records(&mut self, from: &str, to: &str) -> bool { restamp_consent(self, from, to) }
+}
+
+/// Every list a sign-in stamps with the owner. Order is not significant.
+fn stamped_accounts(session: &mut super::Session) -> [&mut dyn StampedAccount; 6] {
+    let prefs = &mut session.prefs;
+    [
+        &mut prefs.track_memory,
+        &mut prefs.subtitle_offsets,
+        &mut prefs.version_choices,
+        &mut prefs.recent_channels,
+        &mut prefs.profile_prefs,
+        &mut prefs.plaintext_consent,
+    ]
+}
+
 /// **Move records stamped `from` onto this session's [`super::account_stamp`].**
 ///
 /// `from` is a token fingerprint ([`crate::plex::grant::account_key`]), not a token. Empty, or
@@ -1127,13 +1164,16 @@ pub fn rebind_account_records(session: &mut super::Session, from: &str) -> bool 
     if from.is_empty() || to.is_empty() || from == to {
         return false;
     }
-    let mut changed = restamp_memory(&mut session.prefs.track_memory, from, &to);
-    changed |= restamp_memory(&mut session.prefs.subtitle_offsets, from, &to);
-    changed |= restamp_memory(&mut session.prefs.version_choices, from, &to);
-    changed |= restamp_memory(&mut session.prefs.recent_channels, from, &to);
-    changed |= restamp_profile_prefs(&mut session.prefs.profile_prefs, from, &to);
-    changed |= restamp_consent(&mut session.prefs.plaintext_consent, from, &to);
-    changed
+    stamped_accounts(session).into_iter().fold(false, |changed, list| changed | list.restamp_records(from, &to))
+}
+
+/// **Drop every stamped account record.** A known different owner calls this: the lists carry a
+/// stamp, so leaving them would hand the previous account's version choice and recent channels
+/// back when that owner signs in again.
+pub fn drop_stamped_account_records(session: &mut super::Session) {
+    for list in stamped_accounts(session) {
+        list.clear_records();
+    }
 }
 
 /// **Adopt records an older build stamped with this session's token**, onto the owner stamp.
